@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FlowRad Private — радар</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; font-family:'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+
+  :root {
+    --bg: #000000;
+    --panel: #000000;
+    --border: #242424;
+    --border-soft: #202020;
+    --text: #cddcf2;
+    --text-dim: #7f96b8;
+    --text-faint: #4c5f80;
+    --accent: #ffa845;
+    --accent-ink: #1a1103;
+    --shadow: 0 8px 30px rgba(0,0,0,0.55);
+    --input-bg: #050505;
+    --slider-track: #2a2a2a;
+    --danger: #ff6a6a;
+    --map-bg: #080c14;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  /* Светлая тема — в стиле nowcast.ru: белые панели, тонкие серые границы, тёмный текст */
+  html[data-theme="light"] {
+    --bg: #eef1f5;
+    --panel: #ffffff;
+    --border: #d7dce3;
+    --border-soft: #e6e9ee;
+    --text: #1b2430;
+    --text-dim: #5c6b7d;
+    --text-faint: #96a2b3;
+    --accent: #1f6fd6;
+    --accent-ink: #ffffff;
+    --shadow: 0 6px 20px rgba(30,40,60,0.12);
+    --input-bg: #f3f5f8;
+    --slider-track: #dbe0e7;
+    --danger: #d13b3b;
+    --map-bg: #e6e9ee;
+  }
+
+  html[data-theme="light"] .panel { border-color: var(--border); }
+
+  body { background: var(--bg); color: var(--text); }
+  #map { position:absolute; top:0; bottom:0; left:0; right:0; background:var(--map-bg); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+  }
+
+  .top-left {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 11px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    color: var(--text-dim);
+  }
+  .brand .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    flex-shrink: 0;
+  }
+  .brand .dot.live { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse {
+    0%,100% { opacity:1; transform:scale(1); }
+    50% { opacity:.45; transform:scale(1.3); }
+  }
+
+  .segmented {
+    display: flex;
+    padding: 3px;
+    gap: 2px;
+  }
+  .segmented button {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 6px 11px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    transition: background .18s, color .18s;
+  }
+  .segmented button svg { width: 14px; height: 14px; fill: currentColor; flex-shrink:0; }
+  .segmented button:hover { color: var(--text); }
+  .segmented button.active {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .segmented.vertical { flex-direction: column; }
+
+  .radar-control {
+    position: absolute;
+    bottom: 20px;
+    right: 14px;
+    z-index: 1000;
+    padding: 10px;
+    width: 160px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: calc(100vh - 140px);
+  }
+  .radar-control .segmented { flex-direction: column; background: var(--input-bg); border-radius: 9px; flex-shrink: 0; }
+  .radar-control .segmented button { justify-content: flex-start; padding: 5px 10px; font-size: 10.5px; }
+
+  .legend-block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .legend-block.collapsed {
+    flex: 0 0 auto;
+  }
+  .legend-block.collapsed .legend-list {
+    display: none;
+  }
+  .legend-block.collapsed .legend-title {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+  }
+  .legend-title {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--text-faint);
+    border-bottom: 1px solid var(--border-soft);
+    padding-bottom: 4px;
+    margin-bottom: 3px;
+    flex-shrink: 0;
+  }
+  .legend-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    overflow-y: auto;
+    padding-right: 4px;
+    flex: 1;
+  }
+  .legend-list::-webkit-scrollbar { width: 3px; }
+  .legend-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .legend-row { display:flex; align-items:center; gap:5px; }
+  .legend-swatch {
+    width: 12px; height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    border: 1px solid var(--border-soft);
+  }
+  .legend-swatch.empty {
+    background-image: linear-gradient(45deg, var(--border-soft) 25%, transparent 25%, transparent 50%, var(--border-soft) 50%, var(--border-soft) 75%, transparent 75%, transparent);
+    background-size: 5px 5px;
+  }
+  .legend-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .opacity-block { 
+    display:flex; 
+    flex-direction:column; 
+    gap:4px; 
+    padding-top: 6px; 
+    border-top: 1px solid var(--border-soft);
+    flex-shrink: 0;
+  }
+  .opacity-row { display:flex; align-items:center; justify-content:space-between; }
+  .opacity-row .opacity-title {
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-faint);
+  }
+  .opacity-row .opacity-value { font-family: var(--mono); font-size: 9px; color: var(--text-dim); }
+  .opacity-block input[type="range"] {
+    width: 100%;
+    height: 3px;
+    -webkit-appearance: none;
+    background: var(--slider-track);
+    border-radius: 2px;
+    outline: none;
+  }
+  .opacity-block input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent); cursor:pointer; border: 2px solid var(--panel-solid);
+  }
+
+  .timeline-control {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    padding: 6px 10px 6px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 300px;
+    justify-content: center;
+  }
+  .timeline-control .transport { display:flex; align-items:center; gap:3px; }
+  .timeline-control button.tbtn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    width: 26px; height: 26px;
+    display:flex; align-items:center; justify-content:center;
+    cursor: pointer;
+    transition: all .18s;
+  }
+  .timeline-control button.tbtn svg { width:12px; height:12px; fill:currentColor; }
+  .timeline-control button.tbtn:hover { border-color: var(--accent); color: var(--accent); }
+  .timeline-control button.tbtn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+  .timeline-control input[type="range"] {
+    flex: 1;
+    min-width: 100px;
+    height: 3px;
+    -webkit-appearance: none;
+    background: var(--slider-track);
+    border-radius: 2px;
+    outline: none;
+  }
+  .timeline-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid var(--panel-solid);
+  }
+  .readout { display:flex; flex-direction:column; align-items:center; min-width: 70px; }
+  .readout .time-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .readout .frame-counter {
+    font-family: var(--mono);
+    font-size: 8px;
+    color: var(--text-faint);
+  }
+  .speed-seg { display:flex; gap:2px; padding-left: 4px; border-left: 1px solid var(--border-soft); margin-left: 2px; }
+  .speed-seg button {
+    background:transparent; border:1px solid var(--border); color:var(--text-dim);
+    font-family: var(--mono); font-size:8.5px; border-radius:5px; padding:3px 5px; cursor:pointer;
+  }
+  .speed-seg button.active { background: var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+
+  #status {
+    position: absolute;
+    bottom: 62px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    background: var(--panel);
+    padding: 3px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    z-index: 1000;
+    pointer-events: none;
+    text-align: center;
+    max-width: 90%;
+  }
+  #status.err { color: var(--danger); border-color: #5a2a2a; }
+
+  .ui-btn {
+    appearance:none; border:1px solid var(--border); background:var(--input-bg); color:var(--text-dim);
+    font:500 9px var(--mono); border-radius:5px; padding:4px 6px; cursor:pointer;
+    transition:.18s;
+  }
+  .ui-btn:hover { color:var(--text); border-color:var(--accent); }
+  .ui-btn.active { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  .legend-head { display:flex; align-items:center; justify-content:space-between; gap:6px; flex-shrink:0; }
+  .legend-toggle { width:20px; height:18px; padding:0; display:grid; place-items:center; font-size:10px; }
+
+  .theme-toggle {
+    width: 18px; height: 18px; padding: 0;
+    display: grid; place-items: center;
+    background: transparent; border-color: var(--border-soft);
+  }
+  .theme-toggle svg { width:12px; height:12px; fill:currentColor; }
+  html[data-theme="light"] .theme-toggle svg { fill: var(--accent); }
+
+  @media (max-width: 700px) {
+    .timeline-control { min-width: unset; width: calc(100% - 20px); padding: 5px 6px; gap: 4px; bottom: 10px; }
+    .readout { min-width: 50px; }
+    .readout .time-label { font-size: 8.5px; }
+    .speed-seg { display:none; }
+    .radar-control { 
+      bottom: 58px; 
+      right: 8px; 
+      width: 130px; 
+      padding: 8px;
+      max-height: calc(100vh - 100px);
+    }
+    #status { bottom: 52px; font-size: 8.5px; padding: 2px 8px; }
+    .top-left { top: 8px; left: 8px; }
+    .brand span.label { display:none; }
+    .segmented button span.label { display:none; }
+    .segmented button { padding: 5px; }
+  }
+
+  .tool-btn {
+    position:absolute; top:14px; right:14px; z-index:1001;
+    display:flex; align-items:center; gap:5px; padding:6px 10px;
+    border:1px solid var(--border); border-radius:8px; background:var(--panel);
+    color:var(--text-dim); font:500 10px var(--mono); cursor:pointer;
+    box-shadow: var(--shadow);
+  }
+  .tool-btn:hover, .tool-btn.active { border-color:var(--accent); color:var(--text); }
+
+  .measure-distance {
+    background: rgba(255,255,255,.95);
+    color: #111;
+    border: 1px solid rgba(0,0,0,.3);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font: 700 10px var(--mono);
+    white-space: nowrap;
+    text-align: center;
+    line-height: 16px;
+  }
+
+  .radar-point-info {
+    min-width: 100px;
+    font: 10px var(--mono);
+    line-height: 1.4;
+    background: var(--panel);
+    color: var(--text);
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    position: relative;
+  }
+  .radar-point-info .title {
+    font-weight: 700;
+    margin-bottom: 2px;
+    color: var(--accent);
+    font-size: 10px;
+  }
+  .radar-point-info .value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .radar-point-info .close-btn {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    transition: color .2s;
+  }
+  .radar-point-info .close-btn:hover {
+    color: var(--accent);
+  }
+  .leaflet-popup-content-wrapper {
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+  .leaflet-popup-tip {
+    background: var(--panel) !important;
+    box-shadow: none !important;
+  }
+  .leaflet-popup {
+    margin-bottom: 3px !important;
+  }
+  .leaflet-popup-close-button {
+    display: none !important;
+  }
+  .leaflet-popup-content {
+    margin: 0 !important;
+    min-width: auto !important;
+  }
+
+  /* Резкий, немасштабированный рендер радарного кадра — без сглаживания браузером */
+  .radar-overlay {
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+  }
+
+  /* Более чёткие и контрастные административные границы поверх карты */
+  .borders-pane {
+    z-index: 450;
+    filter: contrast(1.35) brightness(1.15);
+    mix-blend-mode: screen;
+  }
+</style>
+</head>
+<body>
+<button id="measureBtn" type="button" class="tool-btn" title="Линейка — измерить расстояние">
+  <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14"><path d="M4 17L17 4l3 3L7 20H4v-3zM8 16l-2-2M11 13l-2-2M14 10l-2-2M17 7l-2-2"/></svg>
+  <span class="label">Линейка</span>
+</button>
+
+<div id="map"></div>
+<div id="status">—</div>
+
+<div class="top-left">
+  <div class="brand panel">
+    <span class="dot" id="brandDot"></span><span class="label">FLOWRad Private</span>
+    <button class="ui-btn theme-toggle" id="themeToggle" title="Светлая тема">
+      <svg viewBox="0 0 24 24" width="12" height="12"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.4 5.4 0 0 1-7.54-7.54A9 9 0 0 0 12 3z"/></svg>
+    </button>
+  </div>
+  <div class="segmented panel vertical" id="basemapSwitch">
+    <button data-basemap="dark" class="active" title="Тёмная">
+      <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 2a7 7 0 0 1 0 14V5z"/></svg>
+      <span class="label">Тёмная</span>
+    </button>
+    <button data-basemap="satellite" title="Спутник">
+      <svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      <span class="label">Спутник</span>
+    </button>
+    <button data-basemap="streets" title="Улицы">
+      <svg viewBox="0 0 24 24"><path d="M12 21c-4-4.5-7-8-7-11a7 7 0 1 1 14 0c0 3-3 6.5-7 11zm0-8a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>
+      <span class="label">Улицы</span>
+    </button>
+    <button data-basemap="eumetsat" title="EUMETSAT — облачность">
+      <svg viewBox="0 0 24 24"><path d="M6 17a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 16 8a4.5 4.5 0 0 1 .5 9H6z"/></svg>
+      <span class="label">EUMETSAT</span>
+    </button>
+  </div>
+</div>
+
+<div class="radar-control panel" id="radarControl">
+  <div class="segmented" id="modeSwitch">
+    <button data-mode="reflect" class="active">Отражаемость</button>
+    <button data-mode="speed">Скорость</button>
+    <button data-mode="height">Высота ВГО</button>
+  </div>
+  <div class="legend-block" id="legendBlock">
+    <div class="legend-head">
+      <div class="legend-title" id="legendTitle">Отражаемость (dBZ)</div>
+      <button class="ui-btn legend-toggle" id="legendToggle" title="Свернуть легенду">−</button>
+    </div>
+    <div class="legend-list" id="legendList"></div>
+  </div>
+  <div class="opacity-block">
+    <div class="opacity-row">
+      <span class="opacity-title">Яркость</span>
+      <span class="opacity-value" id="opacityValue">82%</span>
+    </div>
+    <input type="range" id="opacitySlider" min="10" max="100" step="1" value="82">
+  </div>
+</div>
+
+<div class="timeline-control panel" id="timelineControl">
+  <div class="transport">
+    <button class="tbtn" id="prevBtn" title="Назад">
+      <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+    </button>
+    <button class="tbtn" id="playBtn" title="Воспроизвести">
+      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+    </button>
+    <button class="tbtn" id="nextBtn" title="Вперёд">
+      <svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 6l8.5 6L6 18z"/></svg>
+    </button>
+  </div>
+  <input type="range" id="timeSlider" min="0" max="0" value="0" step="1">
+  <div class="readout">
+    <span class="time-label" id="timeLabel">—</span>
+    <span class="frame-counter" id="frameCounter">0/0</span>
+  </div>
+  <div class="speed-seg" id="speedSwitch">
+    <button data-speed="0.5">0.5×</button>
+    <button data-speed="1" class="active">1×</button>
+    <button data-speed="2">2×</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// ════════════════════════════════════════════════════════════════
+// ✅ ВАШ URL WORKER (ОБНОВЛЁННЫЙ!)
+// ════════════════════════════════════════════════════════════════
+const PROXY_URL = "https://silent-queen-a21c.aleksandrrakhmanin2011.workers.dev";
+
+// ════════════════════════════════════════════════════════════════
+// ДАЛЬШЕ КОД НЕ ТРОГАЙТЕ — ВСЁ РАБОТАЕТ АВТОМАТИЧЕСКИ
+// ════════════════════════════════════════════════════════════════
+
+const MODES = {
+  reflect: { label: 'Отражаемость', coverage: 'europe', candidates: ['dbz','reflectivity','reflect'], resolved:null, unit: 'dBZ' },
+  speed:   { label: 'Скорость', coverage: 'europe', candidates: ['velocity','vel','radial_velocity','wind'], resolved:null, unit: 'м/с' },
+  height:  { label: 'Высота ВГО', coverage: 'europe', candidates: ['height','echotop','etop','echo_top','vil_echotop'], resolved:null, unit: 'км' }
+};
+
+const LEGEND_TABLES = {
+  reflect: [
+    ['empty','нет данных','transparent'],[-30,'-30','#dcdcdc'],[-10,'-10','#a8a8a8'],
+    [-5,'-5','#a8cbe8'],[0,'0','#c3f0a0'],[5,'5','#4be34b'],[10,'10','#33bdec'],
+    [15,'15','#3d6ee6'],[20,'20','#2e39ad'],[25,'25','#2e2e6b'],[30,'30','#fbf13a'],
+    [35,'35','#f5952f'],[40,'40','#f2726a'],[45,'45','#e73a3a'],[50,'50','#54c651'],
+    [55,'55','#2e7d31'],[60,'60','#f04df0'],[65,'65','#a63de0'],[70,'70','#8a3a3a']
+  ],
+  height: [
+    ['empty','нет эхо','#d8d8d8'],[0,'0.0','#4be6a8'],[0.2,'0.2','#55dd88'],
+    [0.5,'0.5','#6bc9a0'],[1,'1.0','#6ba898'],[2,'2.0','#5b9484'],
+    [3,'3.0','#4a6d63'],[4,'4.0','#55c8dd'],[5,'5.0','#4a90d9'],[6,'6.0','#5670c2'],
+    [7,'7.0','#3d4a80'],[8,'8.0','#d4c06a'],[9,'9.0','#e08a5c'],[10,'10.0','#d9584a'],
+    [11,'11.0','#8a3a42'],[12,'12.0','#8ac05c'],[13,'13.0','#3d5c3d'],[14,'14.0','#a04060'],
+    [15,'15.0','#e888c0']
+  ],
+  speed: [
+    ['empty','нет эхо','#d8d8d8'],[-50,'-50','#6bb0cc'],[-40,'-40','#5a8fa8'],
+    [-30,'-30','#3d6b45'],[-25,'-25','#5a9060'],[-20,'-20','#4dc060'],
+    [-15,'-15','#6bdd6b'],[-10,'-10','#8ae88a'],[-5,'-5','#b8d4c0'],
+    [-0.5,'-0.5','#dcf0e4'],[0,'0','#f5f5f5'],[0.5,'0.5','#f050e0'],
+    [5,'5','#b050c0'],[10,'10','#9040a8'],[15,'15','#a83d40'],
+    [20,'20','#c04a45'],[25,'25','#d85850'],[30,'30','#e06a5c'],
+    [40,'40','#ec8a78'],[50,'50','#f0a898']
+  ]
+};
+
+const BASEMAPS = {
+  dark: () => [
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      {subdomains:'abcd',maxZoom:19,attribution:'© OpenStreetMap © CARTO'})
+  ],
+  satellite: () => [
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {maxZoom:19,attribution:'Tiles © Esri'}),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+      {maxZoom:19,attribution:'Tiles © Esri'})
+  ],
+  streets: () => [
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      {subdomains:'abcd',maxZoom:19,attribution:'© OpenStreetMap © CARTO'})
+  ],
+  eumetsat: () => [
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
+      {subdomains:'abcd',maxZoom:19,attribution:'© CARTO'}),
+    L.tileLayer.wms('https://view.eumetsat.int/geoserver/wms',{
+      layers:'msg_fes:rgb_naturalenhncd',format:'image/png',transparent:true,
+      version:'1.3.0',maxZoom:9,minZoom:1,attribution:'© EUMETSAT'
+    })
+  ]
+};
+
+const map = L.map('map',{zoomControl:true,worldCopyJump:true}).setView([55,50],4);
+
+// Отдельная панель для чётких границ — рисуется поверх радара
+map.createPane('bordersPane');
+map.getPane('bordersPane').classList.add('borders-pane');
+map.getPane('bordersPane').style.pointerEvents = 'none';
+
+let activeBasemapLayers = [];
+let bordersLayer = null;
+let overlay = null;
+let currentBasemap = 'dark';
+let currentMode = 'reflect';
+let currentFrames = [];
+let currentIndex = 0;
+let boxCache = {};
+let isLoaded = false;
+let isPlaying = false;
+let playTimer = null;
+let playIntervalMs = 450;
+let radarOpacity = 0.82;
+let currentPopup = null;
+
+const statusEl = document.getElementById('status');
+const legendTitle = document.getElementById('legendTitle');
+const legendList = document.getElementById('legendList');
+const opacitySlider = document.getElementById('opacitySlider');
+const opacityValue = document.getElementById('opacityValue');
+const timeSlider = document.getElementById('timeSlider');
+const playBtn = document.getElementById('playBtn');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const frameCounter = document.getElementById('frameCounter');
+const timeLabel = document.getElementById('timeLabel');
+const brandDot = document.getElementById('brandDot');
+const legendBlock = document.getElementById('legendBlock');
+const legendToggle = document.getElementById('legendToggle');
+const themeToggle = document.getElementById('themeToggle');
+
+function setStatus(text, err=false) {
+  statusEl.textContent = text;
+  statusEl.className = err ? 'err' : '';
+}
+
+function merc2ll(x,y) {
+  const R=6378137;
+  return [(2*Math.atan(Math.exp(y/R))-Math.PI/2)*180/Math.PI,(x/R)*180/Math.PI];
+}
+
+async function fetchJSON(url) {
+  const res=await fetch(url,{cache:'no-store'});
+  if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+function frameLabel(f) {
+  const m=String(f.t||'').match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  return m ? `${m[3]}.${m[2]} ${m[4]}:${m[5]}` : (f.t||'—');
+}
+
+function frameUrl(frame) {
+  const p=String(frame.path||'').replace(/^\//,'');
+  return `${PROXY_URL}/${p}`;
+}
+
+// Цвет фонового "нет данных", которым источник заливает пустые области кадра (одинаковый во всех продуктах)
+const EMPTY_BG_COLORS = { reflect: '#d8d8d8', speed: '#d8d8d8', height: '#d8d8d8' };
+
+function getEmptyColor(modeKey) {
+  return EMPTY_BG_COLORS[modeKey] || null;
+}
+
+function hexToRgb(hex) {
+  const h = hex.replace('#', '');
+  return [parseInt(h.substring(0,2),16), parseInt(h.substring(2,4),16), parseInt(h.substring(4,6),16)];
+}
+
+// Загружает кадр, вырезает сплошной серый фон "нет эхо" через canvas и возвращает прозрачный PNG (data URL)
+function loadChromaKeyed(url, emptyColor) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = imgData.data;
+        const [er, eg, eb] = hexToRgb(emptyColor);
+        const tol = 16;
+        for (let i = 0; i < d.length; i += 4) {
+          if (Math.abs(d[i]-er) <= tol && Math.abs(d[i+1]-eg) <= tol && Math.abs(d[i+2]-eb) <= tol) {
+            d[i+3] = 0;
+          }
+        }
+        ctx.putImageData(imgData, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      } catch (e) {
+        resolve(url); // canvas "испачкан" CORS'ом или другая ошибка — используем исходный кадр
+      }
+    };
+    img.onerror = () => resolve(url);
+    img.src = url;
+  });
+}
+
+function renderLegend(modeKey) {
+  const mode=MODES[modeKey];
+  legendTitle.textContent=mode.label + ' (' + mode.unit + ')';
+  legendList.innerHTML='';
+  (LEGEND_TABLES[modeKey]||[]).forEach(([value,label,color])=>{
+    const row=document.createElement('div'); row.className='legend-row';
+    const sw=document.createElement('span');
+    sw.className='legend-swatch'+(value==='empty'?' empty':'');
+    if(value!=='empty') sw.style.background=color;
+    const text=document.createElement('span'); text.className='legend-label'; text.textContent=label;
+    row.append(sw,text); legendList.appendChild(row);
+  });
+}
+
+function setBasemap(key) {
+  if(!BASEMAPS[key]) return;
+  activeBasemapLayers.forEach(l=>map.removeLayer(l));
+  activeBasemapLayers=BASEMAPS[key]();
+  activeBasemapLayers.forEach(l=>l.addTo(map));
+
+  if(bordersLayer){map.removeLayer(bordersLayer);bordersLayer=null;}
+  if(key!=='satellite'){
+    // спутник уже содержит собственный слой границ — для остальных подложек добавляем чёткий контур поверх радара
+    bordersLayer=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',{
+      subdomains:'abcd',maxZoom:19,pane:'bordersPane',opacity:0.9,attribution:'© OpenStreetMap © CARTO'
+    }).addTo(map);
+  }
+
+  if(overlay) overlay.bringToFront();
+  currentBasemap=key;
+  document.querySelectorAll('#basemapSwitch button').forEach(b=>{
+    b.classList.toggle('active',b.dataset.basemap===key);
+  });
+  setStatus(`Подложка: ${key}`);
+}
+
+async function loadFrameList(modeKey) {
+  const mode=MODES[modeKey];
+  try {
+    setStatus(`Загрузка ${mode.label.toLowerCase()}…`);
+    let data=null,product=null;
+    for(const candidate of mode.candidates){
+      try{
+        const d=await fetchJSON(`${PROXY_URL}/frames/${candidate}/${mode.coverage}.json`);
+        if(Array.isArray(d.frames)&&d.frames.length){data=d;product=candidate;break;}
+      }catch(e){}
+    }
+    if(!data) throw new Error(`нет данных (${mode.candidates.join(', ')})`);
+    mode.resolved=product;
+    currentFrames=[...data.frames].sort((a,b)=>(Date.parse(a.t)||0)-(Date.parse(b.t)||0));
+    boxCache[`${product}/${mode.coverage}`]=data.box;
+    timeSlider.min=0;
+    timeSlider.max=Math.max(0,currentFrames.length-1);
+    currentIndex=currentFrames.length-1;
+    timeSlider.value=currentIndex;
+    isLoaded=true;
+    updateTimeDisplay();
+    await showFrame(currentIndex,product,mode.coverage, true);
+  }catch(e){
+    isLoaded=false;
+    setStatus(`Ошибка: ${e.message}`,true);
+  }
+}
+
+function showFrame(index,product,coverage, fitBounds=false) {
+  return new Promise(resolve=>{
+    if(!currentFrames.length) return resolve();
+    const frame=currentFrames[index];
+    const box=boxCache[`${product}/${coverage}`];
+    if(!box) return resolve();
+    const [west,south,east,north]=box;
+    const bounds=[merc2ll(west,south),merc2ll(east,north)];
+
+    const rawUrl = frameUrl(frame);
+    const emptyColor = getEmptyColor(currentMode);
+    const srcPromise = emptyColor ? loadChromaKeyed(rawUrl, emptyColor) : Promise.resolve(rawUrl);
+
+    srcPromise.then(src => {
+      const next=L.imageOverlay(src,bounds,{opacity:0,crossOrigin:true,className:'radar-overlay'});
+      next.once('load',()=>{
+        next.setOpacity(radarOpacity);
+        if(overlay) map.removeLayer(overlay);
+        overlay=next; overlay.addTo(map);
+        if (fitBounds) {
+          map.fitBounds(bounds,{padding:[20,20]});
+        }
+        setStatus(`${MODES[currentMode].label} — ${frameLabel(frame)}`);
+        resolve();
+      });
+      next.once('error',()=>{
+        map.removeLayer(next);
+        setStatus('Не удалось загрузить радиолокационный кадр',true);
+        resolve();
+      });
+      next.addTo(map);
+    });
+  });
+}
+
+function updateTimeDisplay() {
+  if(!currentFrames.length){frameCounter.textContent='0/0';timeLabel.textContent='—';return;}
+  frameCounter.textContent=`${currentIndex+1}/${currentFrames.length}`;
+  timeLabel.textContent=frameLabel(currentFrames[currentIndex]);
+}
+
+function goToFrame(i) {
+  if(!isLoaded) return;
+  const mode=MODES[currentMode];
+  if(mode.resolved) showFrame(i,mode.resolved,mode.coverage, false);
+  currentIndex = i;
+  timeSlider.value = i;
+  updateTimeDisplay();
+}
+
+function stopPlayback() {
+  isPlaying=false;
+  if(playTimer){clearInterval(playTimer);playTimer=null;}
+  playBtn.classList.remove('active');
+  playBtn.innerHTML='<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+  brandDot.classList.remove('live');
+}
+
+function startPlayback() {
+  if(currentFrames.length<2)return;
+  stopPlayback();
+  isPlaying=true;
+  playBtn.classList.add('active');
+  playBtn.innerHTML='<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>';
+  brandDot.classList.add('live');
+  playTimer=setInterval(()=>{
+    currentIndex=(currentIndex+1)%currentFrames.length;
+    goToFrame(currentIndex);
+  },playIntervalMs);
+}
+
+function togglePlayback(){isPlaying?stopPlayback():startPlayback();}
+
+function activateMode(mode) {
+  stopPlayback();
+  currentMode=mode;
+  if (currentPopup) {
+    map.closePopup(currentPopup);
+    currentPopup = null;
+  }
+  document.querySelectorAll('#modeSwitch button').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
+  renderLegend(mode);
+  if(overlay){map.removeLayer(overlay);overlay=null;}
+  timeSlider.disabled=false; playBtn.disabled=false; prevBtn.disabled=false; nextBtn.disabled=false;
+  loadFrameList(mode);
+}
+
+document.getElementById('basemapSwitch').addEventListener('click',e=>{
+  const btn=e.target.closest('button[data-basemap]');
+  if(!btn)return;
+  setBasemap(btn.dataset.basemap);
+});
+
+document.getElementById('modeSwitch').addEventListener('click',e=>{
+  const btn=e.target.closest('button[data-mode]');
+  if(!btn)return;
+  activateMode(btn.dataset.mode);
+});
+
+playBtn.addEventListener('click',togglePlayback);
+prevBtn.addEventListener('click',()=>{
+  stopPlayback();
+  if(currentIndex>0) goToFrame(--currentIndex);
+});
+nextBtn.addEventListener('click',()=>{
+  stopPlayback();
+  if(currentIndex<currentFrames.length-1) goToFrame(++currentIndex);
+});
+timeSlider.addEventListener('input',e=>{
+  stopPlayback();
+  goToFrame(Number(e.target.value));
+});
+
+opacitySlider.addEventListener('input',e=>{
+  radarOpacity=Number(e.target.value)/100;
+  opacityValue.textContent=`${e.target.value}%`;
+  if(overlay)overlay.setOpacity(radarOpacity);
+});
+
+legendToggle.addEventListener('click',()=>{
+  const collapsed=legendBlock.classList.toggle('collapsed');
+  legendToggle.textContent=collapsed?'+':'−';
+  legendToggle.title=collapsed?'Развернуть легенду':'Свернуть легенду';
+});
+
+let currentTheme='dark';
+function applyTheme(theme){
+  currentTheme=theme;
+  document.documentElement.setAttribute('data-theme',theme);
+  if(themeToggle) themeToggle.title = theme==='light' ? 'Тёмная тема' : 'Светлая тема';
+}
+if(themeToggle){
+  themeToggle.addEventListener('click',()=>{
+    applyTheme(currentTheme==='light'?'dark':'light');
+  });
+}
+applyTheme('dark');
+
+document.addEventListener('keydown',e=>{
+  if(e.target.matches('input,select,textarea'))return;
+  if(e.key==='ArrowLeft'){stopPlayback();if(currentIndex>0)goToFrame(--currentIndex);}
+  if(e.key==='ArrowRight'){stopPlayback();if(currentIndex<currentFrames.length-1)goToFrame(++currentIndex);}
+  if(e.code==='Space'){e.preventDefault();togglePlayback();}
+  if(e.key==='Escape' && currentPopup) {
+    map.closePopup(currentPopup);
+    currentPopup = null;
+  }
+});
+
+/* Линейка */
+let measureActive = false;
+let measurePoints = [];
+let measureMarkers = [];
+let measureLine = null;
+let measureLabel = null;
+
+function clearMeasure() {
+  measureMarkers.forEach(m => map.removeLayer(m));
+  measureMarkers = [];
+  if (measureLine) { map.removeLayer(measureLine); measureLine = null; }
+  if (measureLabel) { map.removeLayer(measureLabel); measureLabel = null; }
+  measurePoints = [];
+}
+
+function formatKm(km) {
+  if (km < 1) return `${Math.round(km * 1000)} м`;
+  if (km < 10) return `${km.toFixed(2)} км`;
+  if (km < 100) return `${km.toFixed(1)} км`;
+  return `${Math.round(km)} км`;
+}
+
+function addMeasurePoint(latlng) {
+  if (measurePoints.length === 2) clearMeasure();
+  measurePoints.push(latlng);
+
+  const marker = L.circleMarker(latlng, {
+    radius: 5,
+    color: '#111',
+    weight: 2,
+    fillColor: '#fff',
+    fillOpacity: 1,
+    interactive: false
+  }).addTo(map);
+  measureMarkers.push(marker);
+
+  if (measurePoints.length === 1) {
+    setStatus('Линейка: поставьте вторую точку');
+    return;
+  }
+
+  const a = measurePoints[0], b = measurePoints[1];
+  const km = a.distanceTo(b) / 1000;
+
+  measureLine = L.polyline([a, b], {
+    color: '#111',
+    weight: 2,
+    dashArray: '6 4',
+    interactive: false
+  }).addTo(map);
+
+  const middle = L.latLng((a.lat+b.lat)/2, (a.lng+b.lng)/2);
+  measureLabel = L.marker(middle, {
+    interactive: false,
+    icon: L.divIcon({
+      className: 'measure-distance',
+      html: formatKm(km),
+      iconSize: [80, 22],
+      iconAnchor: [40, 11]
+    })
+  }).addTo(map);
+
+  setStatus(`Расстояние: ${formatKm(km)}`);
+}
+
+function toggleMeasure(e) {
+  if (e) e.preventDefault();
+  measureActive = !measureActive;
+  const btn = document.getElementById('measureBtn');
+  if (btn) btn.classList.toggle('active', measureActive);
+
+  if (measureActive) {
+    clearMeasure();
+    map.getContainer().style.cursor = 'crosshair';
+    setStatus('Линейка активна: нажмите на карте');
+  } else {
+    clearMeasure();
+    map.getContainer().style.cursor = '';
+    setStatus('Линейка выключена');
+  }
+}
+
+map.on('click', function(e) {
+  if (measureActive) {
+    addMeasurePoint(e.latlng);
+    return;
+  }
+  if (!['reflect','speed','height'].includes(currentMode)) return;
+  radarPointPopup(e.latlng);
+});
+
+const measureBtn = document.getElementById('measureBtn');
+if (measureBtn) {
+  measureBtn.addEventListener('click', toggleMeasure, false);
+}
+
+function radarPointPopup(latlng) {
+  const mode = MODES[currentMode];
+  const frame = currentFrames[currentIndex];
+  if (!mode || !frame || !mode.resolved) return;
+
+  if (currentPopup) {
+    map.closePopup(currentPopup);
+    currentPopup = null;
+  }
+
+  const content = document.createElement('div');
+  content.className = 'radar-point-info';
+  content.innerHTML = `
+    <button class="close-btn" id="popupCloseBtn">✕</button>
+    <div class="title">${mode.label}</div>
+    <div class="value" id="pointValue">загрузка…</div>
+  `;
+
+  const popup = L.popup({
+    maxWidth: 150,
+    className: 'radar-popup',
+    closeButton: false,
+    offset: [0, -6]
+  })
+  .setLatLng(latlng)
+  .setContent(content)
+  .openOn(map);
+
+  currentPopup = popup;
+
+  setTimeout(() => {
+    const closeBtn = document.getElementById('popupCloseBtn');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (currentPopup) {
+          map.closePopup(currentPopup);
+          currentPopup = null;
+        }
+      });
+    }
+  }, 10);
+
+  queryRadarPoint(latlng).then(value => {
+    const el = document.getElementById('pointValue');
+    if (!el) return;
+    if (value === null || value === undefined) {
+      el.textContent = 'нет данных';
+    } else {
+      el.textContent = `${value} ${mode.unit}`;
+    }
+  });
+}
+
+map.on('popupclose', function() {
+  currentPopup = null;
+});
+
+async function queryRadarPoint(latlng) {
+  const mode = MODES[currentMode];
+  const frame = currentFrames[currentIndex];
+  if (!mode || !frame) return null;
+
+  const urls = [
+    `${PROXY_URL}/frames/${mode.resolved}/point?lat=${encodeURIComponent(latlng.lat)}&lon=${encodeURIComponent(latlng.lng)}&time=${encodeURIComponent(frame.t)}`,
+    `${PROXY_URL}/point/${mode.resolved}?lat=${encodeURIComponent(latlng.lat)}&lon=${encodeURIComponent(latlng.lng)}&time=${encodeURIComponent(frame.t)}`
+  ];
+
+  for (const url of urls) {
+    try {
+      const data = await fetchJSON(url);
+      const raw = data?.value ?? data?.value_dbz ?? data?.dbz ?? data?.velocity ?? data?.speed ?? data?.height ?? data?.data?.value;
+      if (raw !== undefined && raw !== null && Number.isFinite(Number(raw))) {
+        return Number(raw).toFixed(1);
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+setBasemap('dark');
+renderLegend('reflect');
+activateMode('reflect');
+
+setInterval(()=>{
+  loadFrameList(currentMode);
+},180000);
+</script>
+</body>
+</html>
