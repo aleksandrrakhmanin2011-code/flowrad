@@ -466,9 +466,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 // ════════════════════════════════════════════════════════════════
-// 🔥 ВАЖНО: ЗАМЕНИТЕ ЭТУ СТРОКУ НА ВАШ РЕАЛЬНЫЙ URL WORKER
+// ✅ ВАШ URL WORKER (КЛЮЧ ЗАЩИЩЁН!)
 // ════════════════════════════════════════════════════════════════
-const PROXY_URL = "https://radar-proxy.ваш-аккаунт.workers.dev";
+const PROXY_URL = "https://radar-proxy.alexsandrakhmanin2011.workers.dev";
 
 // ════════════════════════════════════════════════════════════════
 // ДАЛЬШЕ КОД НЕ ТРОГАЙТЕ — ВСЁ РАБОТАЕТ АВТОМАТИЧЕСКИ
@@ -868,7 +868,6 @@ if (measureBtn) {
   measureBtn.addEventListener('click', toggleMeasure, false);
 }
 
-/* Значение радара по клику */
 function radarPointPopup(latlng) {
   const mode = MODES[currentMode];
   const frame = currentFrames[currentIndex];
@@ -949,7 +948,6 @@ async function queryRadarPoint(latlng) {
   return null;
 }
 
-/* Инициализация */
 setBasemap('dark');
 renderLegend('reflect');
 activateMode('reflect');
